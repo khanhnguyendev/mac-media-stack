@@ -1,6 +1,6 @@
 #!/bin/bash
 # Mac Media Stack - One-Shot Installer
-# Usage: curl -fsSL https://raw.githubusercontent.com/liamvibecodes/mac-media-stack/main/bootstrap.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/khanhnguyendev/mac-media-stack/main/bootstrap.sh | bash
 
 set -euo pipefail
 
@@ -129,7 +129,7 @@ else
 
         while [[ $attempt -lt $max_attempts ]]; do
             status=$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 "$url" 2>/dev/null || true)
-            if [[ "$status" =~ ^(200|301|302|401|403)$ ]]; then
+            if [[ "$status" =~ ^(200|301|302|307|401|403)$ ]]; then
                 echo -e "  ${GREEN}OK${NC}  $name is reachable"
                 return 0
             fi
@@ -196,7 +196,7 @@ if [[ -d "$INSTALL_DIR" ]]; then
     fi
 else
     echo -e "${CYAN}Cloning repo...${NC}"
-    git clone https://github.com/liamvibecodes/mac-media-stack.git "$INSTALL_DIR"
+    git clone https://github.com/khanhnguyendev/mac-media-stack.git "$INSTALL_DIR"
 fi
 cd "$INSTALL_DIR"
 

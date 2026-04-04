@@ -68,6 +68,7 @@ USER_PGID=$(id -g)
 # Create folder structure
 echo "Creating folders..."
 mkdir -p "$MEDIA_DIR"/{config,Downloads,Movies,"TV Shows",logs}
+mkdir -p "$MEDIA_DIR"/Downloads/{incomplete,complete/radarr,complete/tv-sonarr}
 mkdir -p "$MEDIA_DIR"/config/{qbittorrent,prowlarr,sonarr,radarr,bazarr,seerr}
 echo -e "  ${GREEN}Done${NC}"
 echo ""
@@ -104,5 +105,5 @@ echo "  1. Add VPN keys to .env (if not already done)"
 echo "  2. Run: docker compose up -d"
 echo "     (or: docker compose --profile jellyfin up -d if MEDIA_SERVER=jellyfin)"
 echo "  3. Run: bash scripts/health-check.sh"
-echo "  4. Follow the rest of SETUP.md for Plex + app configuration"
+echo "  4. Follow the rest of docs/SETUP.md for Plex + app configuration"
 echo ""

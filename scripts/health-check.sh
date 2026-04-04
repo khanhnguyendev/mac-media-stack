@@ -32,7 +32,7 @@ check_service() {
     local expected="${3:-200}"
 
     status=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "$url" 2>/dev/null)
-    if [[ "$status" == "$expected" || "$status" == "302" || "$status" == "301" ]]; then
+    if [[ "$status" == "$expected" || "$status" == "301" || "$status" == "302" || "$status" == "307" ]]; then
         echo -e "  ${GREEN}OK${NC}  $name"
         ((PASS++))
     else
@@ -133,7 +133,7 @@ else
         echo -e "  ${GREEN}OK${NC}  Plex (http://localhost:32400/web)"
         ((PASS++))
     else
-        echo -e "  ${YELLOW}SKIP${NC}  Plex not detected (install separately, see SETUP.md)"
+        echo -e "  ${YELLOW}SKIP${NC}  Plex not detected (install separately, see docs/SETUP.md)"
     fi
 fi
 

@@ -12,12 +12,12 @@ services:
     environment:
       - VPN_SERVICE_PROVIDER=protonvpn
       - VPN_TYPE=wireguard
-      - SERVER_COUNTRIES=United States
+      - SERVER_COUNTRIES=Vietnam
       - PORT_FORWARD_ONLY=on
       - VPN_PORT_FORWARDING=on
       - VPN_PORT_FORWARDING_PROVIDER=protonvpn
-      - VPN_PORT_FORWARDING_UP_COMMAND=/bin/sh -c 'wget -O- --retry-connrefused --post-data "json={\"listen_port\":{{PORT}},\"current_network_interface\":\"{{VPN_INTERFACE}}\",\"random_port\":false,\"upnp\":false}" http://127.0.0.1:8080/api/v2/app/setPreferences 2>&1'
-      - VPN_PORT_FORWARDING_DOWN_COMMAND=/bin/sh -c 'wget -O- --retry-connrefused --post-data "json={\"listen_port\":0,\"current_network_interface\":\"lo\"}" http://127.0.0.1:8080/api/v2/app/setPreferences 2>&1'
+      - "VPN_PORT_FORWARDING_UP_COMMAND=/bin/sh -c 'wget --save-cookies /tmp/qb.cookies --keep-session-cookies -qO- --post-data \"username=${QBITTORRENT_USERNAME:-admin}&password=${QBITTORRENT_PASSWORD}\" http://127.0.0.1:8080/api/v2/auth/login >/dev/null && wget --load-cookies /tmp/qb.cookies -O- --retry-connrefused --post-data \"json={\\\"listen_port\\\":{{PORT}},\\\"current_network_interface\\\":\\\"{{VPN_INTERFACE}}\\\",\\\"random_port\\\":false,\\\"upnp\\\":false}\" http://127.0.0.1:8080/api/v2/app/setPreferences 2>&1'"
+      - "VPN_PORT_FORWARDING_DOWN_COMMAND=/bin/sh -c 'wget --save-cookies /tmp/qb.cookies --keep-session-cookies -qO- --post-data \"username=${QBITTORRENT_USERNAME:-admin}&password=${QBITTORRENT_PASSWORD}\" http://127.0.0.1:8080/api/v2/auth/login >/dev/null && wget --load-cookies /tmp/qb.cookies -O- --retry-connrefused --post-data \"json={\\\"listen_port\\\":0,\\\"current_network_interface\\\":\\\"lo\\\"}\" http://127.0.0.1:8080/api/v2/app/setPreferences 2>&1'"
       - TZ=${TIMEZONE:-America/New_York}
     ports:
       - 127.0.0.1:8080:8080    # qbittorrent webui
@@ -152,6 +152,24 @@ services:
       retries: 3
     restart: unless-stopped
 
+  telegram-bot:
+    build: ./telegram-bot
+    container_name: telegram-bot
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      - RADARR_URL=http://radarr:7878
+      - RADARR_API_KEY=${RADARR_API_KEY}
+      - SONARR_URL=http://sonarr:8989
+      - SONARR_API_KEY=${SONARR_API_KEY}
+      - TZ=${TIMEZONE:-America/New_York}
+    depends_on:
+      radarr:
+        condition: service_healthy
+      sonarr:
+        condition: service_healthy
+    restart: unless-stopped
+
   jellyfin:
     image: lscr.io/linuxserver/jellyfin@sha256:4ee07757abcaa0b74fbc74179392311dc2874c03b0bef04bc2d79e9e1a875793
     container_name: jellyfin
@@ -165,7 +183,7 @@ services:
       - ${MEDIA_DIR}/Movies:/data/movies
       - ${MEDIA_DIR}/TV Shows:/data/tvshows
     ports:
-      - 127.0.0.1:8096:8096
+      - 8096:8096
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8096/health || exit 1"]
       interval: 30s

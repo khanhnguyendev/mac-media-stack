@@ -17,8 +17,8 @@
   <img src="https://img.shields.io/badge/qBittorrent-2F67BA?style=flat-square&logo=qbittorrent&logoColor=white" />
   <img src="https://img.shields.io/badge/macOS-000000?style=flat-square&logo=apple&logoColor=white" />
   <br><br>
-  <img src="https://img.shields.io/github/stars/liamvibecodes/mac-media-stack?style=flat-square&color=yellow" />
-  <img src="https://img.shields.io/github/license/liamvibecodes/mac-media-stack?style=flat-square" />
+  <img src="https://img.shields.io/github/stars/khanhnguyendev/mac-media-stack?style=flat-square&color=yellow" />
+  <img src="https://img.shields.io/github/license/khanhnguyendev/mac-media-stack?style=flat-square" />
   <br><br>
 </div>
 
@@ -27,7 +27,7 @@
 There are dozens of *arr stack Docker Compose repos on GitHub. Almost all of them dump a compose file and leave you to figure out the rest. This one is different:
 
 - **One command to install.** Clone, configure, and start everything with a single `curl | bash`. No 45-minute manual setup.
-- **Auto-configures itself.** The configure script wires up Radarr, Sonarr, Prowlarr, Seerr, and qBittorrent via their APIs. No clicking through 6 different web UIs.
+- **Auto-configures itself.** The configure script wires up Radarr, Sonarr, Prowlarr, Seerr, qBittorrent, and Bazarr via their APIs. No clicking through 6 different web UIs.
 - **Built for macOS.** Native paths, launchd instead of systemd, OrbStack or Docker Desktop instead of bare Docker. Not a Linux guide with "should work on Mac" in the footnotes.
 - **Self-healing.** Hourly health checks restart anything that goes down. VPN drops, container crashes, stalled downloads — handled automatically.
 
@@ -63,7 +63,7 @@ There are dozens of *arr stack Docker Compose repos on GitHub. Almost all of the
 Requires OrbStack (or Docker Desktop) and Plex already installed. Handles everything else.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/liamvibecodes/mac-media-stack/main/bootstrap.sh | bash
+curl -fsSL https://raw.githubusercontent.com/khanhnguyendev/mac-media-stack/main/bootstrap.sh | bash
 ```
 
 Optional flags when running from a local clone:
@@ -80,7 +80,7 @@ Already cloned an older version and want the latest release tag without reinstal
 One-liner (run inside your existing clone directory):
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/liamvibecodes/mac-media-stack/main/scripts/update-to-latest-release.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/khanhnguyendev/mac-media-stack/main/scripts/update-to-latest-release.sh)
 ```
 
 Local script (once present):
@@ -106,7 +106,7 @@ bash scripts/update-to-latest-release.sh
 If you prefer to run each step yourself:
 
 ```bash
-git clone https://github.com/liamvibecodes/mac-media-stack.git
+git clone https://github.com/khanhnguyendev/mac-media-stack.git
 cd mac-media-stack
 bash scripts/setup.sh        # creates folders, generates .env
 # edit .env and add your VPN keys
@@ -120,8 +120,8 @@ bash scripts/configure.sh     # auto-configure all services
 
 ## Full Setup Guide
 
-See [SETUP.md](SETUP.md) for the complete step-by-step walkthrough.
-Pinned digest matrix: [IMAGE_LOCK.md](IMAGE_LOCK.md)
+See [docs/SETUP.md](docs/SETUP.md) for the complete step-by-step walkthrough.
+Pinned digest matrix: [docs/IMAGE_LOCK.md](docs/IMAGE_LOCK.md)
 
 By default, Seerr is bound to `127.0.0.1` for safer local-only access. Set `SEERR_BIND_IP=0.0.0.0` in `.env` only if you intentionally want LAN exposure.
 
@@ -131,12 +131,14 @@ By default, Seerr is bound to `127.0.0.1` for safer local-only access. Set `SEER
 |--------|---------|
 | `scripts/setup.sh` | Creates folder structure and .env file |
 | `scripts/doctor.sh` | Runs preflight checks (runtime, env, compose, ports) |
-| `scripts/configure.sh` | Auto-configures all service connections |
+| `scripts/configure.sh` | Auto-configures service connections and Bazarr subtitle defaults |
+| `scripts/e2e-smoke.sh` | Verifies stack health, VPN binding, Bazarr defaults, and container wiring |
+| `scripts/e2e-request-movie.sh` | Traces a Seerr movie request through Radarr, qBittorrent, import, Jellyfin, and Bazarr |
 | `scripts/health-check.sh` | Checks if everything is running correctly |
 | `scripts/auto-heal.sh` | Hourly self-healer (restarts VPN/containers if down) |
 | `scripts/install-auto-heal.sh` | Installs auto-heal as a background job via launchd |
 | `scripts/update-to-latest-release.sh` | Updates an older clone to the latest tagged release safely |
-| `scripts/refresh-image-lock.sh` | Refreshes pinned image digests and regenerates IMAGE_LOCK.md |
+| `scripts/refresh-image-lock.sh` | Refreshes pinned image digests and regenerates `docs/IMAGE_LOCK.md` |
 
 ## What It Looks Like
 
@@ -152,6 +154,30 @@ By default, Seerr is bound to `127.0.0.1` for safer local-only access. Set `SEER
 
 Everything else is automatic. Requests get searched, downloaded, imported, and subtitled without any manual steps.
 
+Bazarr is configured by default to search for both English and Vietnamese subtitles for movies and TV.
+
+## Testing The Stack
+
+Smoke test the live stack:
+
+```bash
+bash scripts/e2e-smoke.sh
+```
+
+Add a safe live transfer check using the official Ubuntu torrent:
+
+```bash
+bash scripts/e2e-smoke.sh --ubuntu-smoke
+```
+
+Trace a specific movie request through Seerr -> Radarr -> qBittorrent -> import -> Jellyfin -> Bazarr:
+
+```bash
+bash scripts/e2e-request-movie.sh --title "Movie Title" --year 2023
+```
+
+Detailed test cases live in [docs/E2E_TESTING.md](docs/E2E_TESTING.md).
+
 ## How It Works
 
 <img src="flow.gif" alt="Request to streaming flow" width="700" />
@@ -165,19 +191,19 @@ All services run as Docker containers. Plex runs natively on macOS (or Jellyfin 
 
 ## Looking for More?
 
-Check out [mac-media-stack-advanced](https://github.com/liamvibecodes/mac-media-stack-advanced) for the full power-user setup with transcoding (Tdarr), TRaSH quality profiles (Recyclarr), Plex metadata automation (Kometa), download watchdog, VPN failover, automated backups, and optional music management (Lidarr + Tidarr for Hi-Res FLAC from Tidal).
-Already running basic and want to migrate? Follow the upgrade guide: [mac-media-stack-advanced/UPGRADE.md](https://github.com/liamvibecodes/mac-media-stack-advanced/blob/main/UPGRADE.md).
+Check out [mac-media-stack-advanced](https://github.com/khanhnguyendev/mac-media-stack-advanced) for the full power-user setup with transcoding (Tdarr), TRaSH quality profiles (Recyclarr), Plex metadata automation (Kometa), download watchdog, VPN failover, automated backups, and optional music management (Lidarr + Tidarr for Hi-Res FLAC from Tidal).
+Already running basic and want to migrate? Follow the upgrade guide: [mac-media-stack-advanced/UPGRADE.md](https://github.com/khanhnguyendev/mac-media-stack-advanced/blob/main/UPGRADE.md).
 
 ## Companion Tools
 
 | Tool | What It Does |
 |------|-------------|
-| [mac-media-stack-permissions](https://github.com/liamvibecodes/mac-media-stack-permissions) | Audit and fix file permissions across your stack |
-| [mac-media-stack-backup](https://github.com/liamvibecodes/mac-media-stack-backup) | Automated backup and restore for configs and databases |
+| [mac-media-stack-permissions](https://github.com/khanhnguyendev/mac-media-stack-permissions) | Audit and fix file permissions across your stack |
+| [mac-media-stack-backup](https://github.com/khanhnguyendev/mac-media-stack-backup) | Automated backup and restore for configs and databases |
 
 ## Author
 
-Built by [@liamvibecodes](https://github.com/liamvibecodes)
+Built by [@khanhnguyendev](https://github.com/khanhnguyendev)
 
 ## License
 

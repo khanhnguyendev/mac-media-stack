@@ -1,12 +1,12 @@
 #!/bin/bash
-# Refreshes image digests in docker-compose.yml and regenerates IMAGE_LOCK.md.
+# Refreshes image digests in docker-compose.yml and regenerates docs/IMAGE_LOCK.md.
 # Uses :latest for each configured image repository, then pins by digest.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 COMPOSE_FILE="$SCRIPT_DIR/docker-compose.yml"
-LOCK_FILE="$SCRIPT_DIR/IMAGE_LOCK.md"
+LOCK_FILE="$SCRIPT_DIR/docs/IMAGE_LOCK.md"
 ENV_FILE="$SCRIPT_DIR/.env"
 
 PROFILES=(autoupdate jellyfin)

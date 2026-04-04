@@ -1,7 +1,7 @@
 #!/bin/bash
 # Media Stack Auto-Configurator
 # Run this ONCE after "docker compose up -d" to configure all services.
-# Replaces manual Steps 8-10 from SETUP.md.
+# Replaces manual Steps 8-10 from docs/SETUP.md.
 # Usage: bash scripts/configure.sh [--non-interactive] [--help]
 
 set -euo pipefail
@@ -74,6 +74,7 @@ qBittorrent Password: $QB_PASSWORD
 Radarr API Key: $RADARR_KEY
 Sonarr API Key: $SONARR_KEY
 Prowlarr API Key: $PROWLARR_KEY
+Bazarr API Key: ${BAZARR_KEY:-}
 EOF
     chmod 600 "$CREDS_FILE"
 }
@@ -97,7 +98,7 @@ api_post_json() {
         return 0
     fi
 
-    if grep -qiE "already exists|must be unique|duplicate" "$body_file"; then
+    if grep -qiE "already exists|must be unique|should be unique|duplicate|already configured|no matching element" "$body_file"; then
         warn "$label (already configured)"
         rm -f "$body_file"
         return 0
@@ -114,13 +115,48 @@ api_post_form() {
     local url="$2"
     local cookie="$3"
     shift 3
+    local body_file http_code
 
-    if curl -fsS -b "$cookie" "$url" "$@" >/dev/null; then
+    body_file="$(mktemp)"
+    http_code=$(curl -sS -o "$body_file" -w "%{http_code}" -b "$cookie" "$url" "$@" || echo "000")
+
+    if [[ "$http_code" =~ ^2 ]]; then
         log "$label"
+        rm -f "$body_file"
         return 0
     fi
 
-    fail "$label"
+    if [[ "$http_code" == "409" ]] || grep -qiE "already exists|must be unique|duplicate" "$body_file"; then
+        warn "$label (already configured)"
+        rm -f "$body_file"
+        return 0
+    fi
+
+    fail "$label (HTTP $http_code)"
+    sed -n '1,2p' "$body_file" >&2 || true
+    rm -f "$body_file"
+    return 1
+}
+
+api_post_bazarr_settings() {
+    local label="$1"
+    shift
+    local body_file http_code
+
+    body_file="$(mktemp)"
+    http_code=$(curl -sS -o "$body_file" -w "%{http_code}" \
+        -H "X-API-KEY: $BAZARR_KEY" \
+        -X POST "http://localhost:6767/api/system/settings" "$@" || echo "000")
+
+    if [[ "$http_code" == "204" || "$http_code" =~ ^2 ]]; then
+        log "$label"
+        rm -f "$body_file"
+        return 0
+    fi
+
+    fail "$label (HTTP $http_code)"
+    sed -n '1,2p' "$body_file" >&2 || true
+    rm -f "$body_file"
     return 1
 }
 
@@ -133,7 +169,7 @@ wait_for_service() {
     warn "Waiting for $name..."
     while [[ $attempt -lt $max_attempts ]]; do
         status=$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 "$url" 2>/dev/null || true)
-        if [[ "$status" =~ ^(200|301|302|401|403)$ ]]; then
+        if [[ "$status" =~ ^(200|301|302|307|401|403)$ ]]; then
             log "$name is ready"
             return 0
         fi
@@ -165,6 +201,27 @@ get_api_key() {
     return 1
 }
 
+get_bazarr_api_key() {
+    local config_path="$MEDIA_DIR/config/bazarr/config/config.yaml"
+    local max_attempts=30
+    local attempt=0
+
+    while [[ $attempt -lt $max_attempts ]]; do
+        if [[ -f "$config_path" ]]; then
+            local key
+            key=$(sed -n '/^auth:/,/^[^ ]/p' "$config_path" 2>/dev/null | sed -n 's/^  apikey: //p' | head -1)
+            if [[ -n "$key" ]]; then
+                echo "$key"
+                return 0
+            fi
+        fi
+        sleep 2
+        ((attempt++))
+    done
+    fail "Could not read API key for bazarr"
+    return 1
+}
+
 # ============================================================
 # Start
 # ============================================================
@@ -181,7 +238,7 @@ echo ""
 # 1. Wait for all services to be ready
 # ============================================================
 
-echo -e "${CYAN}[1/6] Waiting for services to start...${NC}"
+echo -e "${CYAN}[1/7] Waiting for services to start...${NC}"
 echo ""
 
 wait_for_service "qBittorrent" "http://localhost:8080"
@@ -198,7 +255,7 @@ echo ""
 # 2. Extract API keys
 # ============================================================
 
-echo -e "${CYAN}[2/6] Reading API keys...${NC}"
+echo -e "${CYAN}[2/7] Reading API keys...${NC}"
 echo ""
 
 RADARR_KEY=$(get_api_key "radarr")
@@ -210,21 +267,28 @@ log "Sonarr API key: ${SONARR_KEY:0:8}..."
 PROWLARR_KEY=$(get_api_key "prowlarr")
 log "Prowlarr API key: ${PROWLARR_KEY:0:8}..."
 
+BAZARR_KEY=$(get_bazarr_api_key)
+log "Bazarr API key: ${BAZARR_KEY:0:8}..."
+
 echo ""
 
 # ============================================================
 # 3. Configure qBittorrent
 # ============================================================
 
-echo -e "${CYAN}[3/6] Configuring qBittorrent...${NC}"
+echo -e "${CYAN}[3/7] Configuring qBittorrent...${NC}"
 echo ""
 
 # Get temporary password from logs
-QB_TEMP_PASS=$(docker logs qbittorrent 2>&1 | grep -o 'temporary password is provided for this session: [^ ]*' | tail -1 | awk '{print $NF}')
+QB_TEMP_PASS=$(docker logs qbittorrent 2>&1 | grep -o 'temporary password is provided for this session: [^ ]*' | tail -1 | awk '{print $NF}' || true)
 
 if [[ -z "$QB_TEMP_PASS" ]]; then
     # Try the older log format
-    QB_TEMP_PASS=$(docker logs qbittorrent 2>&1 | sed -n 's/.*password: \([^[:space:]]*\).*/\1/p' | tail -1)
+    QB_TEMP_PASS=$(docker logs qbittorrent 2>&1 | sed -n 's/.*password: \([^[:space:]]*\).*/\1/p' | tail -1 || true)
+fi
+
+if [[ -z "$QB_TEMP_PASS" && -f "$CREDS_FILE" ]]; then
+    QB_TEMP_PASS=$(sed -n 's/^qBittorrent Password: //p' "$CREDS_FILE" | head -1)
 fi
 
 if [[ -z "$QB_TEMP_PASS" ]]; then
@@ -236,7 +300,19 @@ fi
 # Authenticate with qBittorrent
 QB_COOKIE=$(curl -s -c - "http://localhost:8080/api/v2/auth/login" \
     --data-urlencode "username=admin" \
-    --data-urlencode "password=$QB_TEMP_PASS" 2>/dev/null | grep SID | awk '{print $NF}')
+    --data-urlencode "password=$QB_TEMP_PASS" 2>/dev/null | grep SID | awk '{print $NF}' || true)
+
+if [[ -z "$QB_COOKIE" && -f "$CREDS_FILE" ]]; then
+    QB_SAVED_PASS=$(sed -n 's/^qBittorrent Password: //p' "$CREDS_FILE" | head -1)
+    if [[ -n "$QB_SAVED_PASS" ]]; then
+        QB_COOKIE=$(curl -s -c - "http://localhost:8080/api/v2/auth/login" \
+            --data-urlencode "username=admin" \
+            --data-urlencode "password=$QB_SAVED_PASS" 2>/dev/null | grep SID | awk '{print $NF}' || true)
+        if [[ -n "$QB_COOKIE" ]]; then
+            QB_PASSWORD="$QB_SAVED_PASS"
+        fi
+    fi
+fi
 
 if [[ -z "$QB_COOKIE" ]]; then
     fail "Could not authenticate with qBittorrent"
@@ -274,7 +350,7 @@ echo ""
 # 4. Configure Radarr & Sonarr
 # ============================================================
 
-echo -e "${CYAN}[4/6] Configuring Radarr & Sonarr...${NC}"
+echo -e "${CYAN}[4/7] Configuring Radarr & Sonarr...${NC}"
 echo ""
 
 # --- Radarr: Add root folder ---
@@ -289,6 +365,7 @@ api_post_json "Radarr download client configured" \
     "$RADARR_KEY" \
     "{
         \"enable\": true,
+        \"priority\": 1,
         \"protocol\": \"torrent\",
         \"name\": \"qBittorrent\",
         \"implementation\": \"QBittorrent\",
@@ -299,8 +376,8 @@ api_post_json "Radarr download client configured" \
             {\"name\": \"username\", \"value\": \"admin\"},
             {\"name\": \"password\", \"value\": \"$QB_PASSWORD\"},
             {\"name\": \"movieCategory\", \"value\": \"radarr\"},
-            {\"name\": \"recentMoviePriority\", \"value\": 0},
-            {\"name\": \"olderMoviePriority\", \"value\": 0},
+            {\"name\": \"recentMoviePriority\", \"value\": 1},
+            {\"name\": \"olderMoviePriority\", \"value\": 1},
             {\"name\": \"initialState\", \"value\": 0},
             {\"name\": \"sequentialOrder\", \"value\": false},
             {\"name\": \"firstAndLast\", \"value\": false}
@@ -321,6 +398,7 @@ api_post_json "Sonarr download client configured" \
     "$SONARR_KEY" \
     "{
         \"enable\": true,
+        \"priority\": 1,
         \"protocol\": \"torrent\",
         \"name\": \"qBittorrent\",
         \"implementation\": \"QBittorrent\",
@@ -331,8 +409,8 @@ api_post_json "Sonarr download client configured" \
             {\"name\": \"username\", \"value\": \"admin\"},
             {\"name\": \"password\", \"value\": \"$QB_PASSWORD\"},
             {\"name\": \"tvCategory\", \"value\": \"tv-sonarr\"},
-            {\"name\": \"recentTvPriority\", \"value\": 0},
-            {\"name\": \"olderTvPriority\", \"value\": 0},
+            {\"name\": \"recentTvPriority\", \"value\": 1},
+            {\"name\": \"olderTvPriority\", \"value\": 1},
             {\"name\": \"initialState\", \"value\": 0},
             {\"name\": \"sequentialOrder\", \"value\": false},
             {\"name\": \"firstAndLast\", \"value\": false}
@@ -347,7 +425,7 @@ echo ""
 # 5. Configure Prowlarr
 # ============================================================
 
-echo -e "${CYAN}[5/6] Configuring Prowlarr...${NC}"
+echo -e "${CYAN}[5/7] Configuring Prowlarr...${NC}"
 echo ""
 
 # --- Create FlareSolverr tag (ID will be 1) ---
@@ -391,6 +469,7 @@ add_indexer() {
             \"configContract\": \"${implementation}Settings\",
             \"protocol\": \"torrent\",
             \"enable\": true,
+            \"priority\": 1,
             \"appProfileId\": 1,
             \"fields\": [
                 {\"name\": \"baseUrl\", \"value\": \"$base_url\"},
@@ -418,11 +497,11 @@ add_cardigann_indexer() {
             \"configContract\": \"CardigannSettings\",
             \"protocol\": \"torrent\",
             \"enable\": true,
+            \"priority\": 1,
             \"appProfileId\": 1,
             \"fields\": [
-                {\"name\": \"baseUrl\", \"value\": \"$base_url\"},
-                {\"name\": \"sortRequestLimit\", \"value\": 100},
-                {\"name\": \"multiLanguages\", \"value\": []}
+                {\"name\": \"definitionFile\", \"value\": \"$definition_name\"},
+                {\"name\": \"baseUrl\", \"value\": \"$base_url\"}
             ],
             \"tags\": [$tags]
         }"
@@ -431,7 +510,7 @@ add_cardigann_indexer() {
 add_cardigann_indexer "YTS" "yts" "https://yts.mx" ""
 add_cardigann_indexer "1337x" "1337x" "https://1337x.to" "$FLARE_TAG_ID"
 add_cardigann_indexer "EZTV" "eztv" "https://eztvx.to" ""
-add_cardigann_indexer "TorrentGalaxy" "torrentgalaxy" "https://torrentgalaxy.to" ""
+add_cardigann_indexer "TorrentGalaxy" "torrentgalaxyclone" "https://torrentgalaxy.info" ""
 
 # --- Connect Radarr as app ---
 api_post_json "Prowlarr connected to Radarr" \
@@ -478,10 +557,75 @@ api_post_json "Indexer sync triggered" \
 echo ""
 
 # ============================================================
-# 6. Configure Seerr
+# 6. Configure Bazarr
 # ============================================================
 
-echo -e "${CYAN}[6/6] Configuring Seerr...${NC}"
+echo -e "${CYAN}[6/7] Configuring Bazarr...${NC}"
+echo ""
+
+BAZARR_DB="$MEDIA_DIR/config/bazarr/db/bazarr.db"
+BAZARR_PROFILE_NAME="English + Vietnamese"
+BAZARR_PROFILE_ITEMS='[{"id":1,"language":"en","forced":"False","hi":"False","audio_only_include":"False"},{"id":2,"language":"vi","forced":"False","hi":"False","audio_only_include":"False"}]'
+
+if command -v sqlite3 >/dev/null 2>&1 && [[ -f "$BAZARR_DB" ]]; then
+    BAZARR_PROFILE_ID=$(sqlite3 "$BAZARR_DB" "select profileId from table_languages_profiles where name = '$BAZARR_PROFILE_NAME' limit 1;")
+    if [[ -z "$BAZARR_PROFILE_ID" ]]; then
+        BAZARR_PROFILE_ID=$(sqlite3 "$BAZARR_DB" "select coalesce(max(profileId), 0) + 1 from table_languages_profiles;")
+    fi
+
+    sqlite3 "$BAZARR_DB" "
+        INSERT INTO table_languages_profiles (profileId, cutoff, originalFormat, items, name, mustContain, mustNotContain, tag)
+        VALUES ($BAZARR_PROFILE_ID, NULL, 0, '$BAZARR_PROFILE_ITEMS', '$BAZARR_PROFILE_NAME', '[]', '[]', NULL)
+        ON CONFLICT(profileId) DO UPDATE SET
+            cutoff = excluded.cutoff,
+            originalFormat = excluded.originalFormat,
+            items = excluded.items,
+            name = excluded.name,
+            mustContain = excluded.mustContain,
+            mustNotContain = excluded.mustNotContain,
+            tag = excluded.tag;
+
+        UPDATE table_settings_languages SET enabled = 1 WHERE code2 IN ('en', 'vi');
+        UPDATE table_settings_languages SET enabled = 1 WHERE code3 IN ('eng', 'vie');
+        UPDATE table_shows SET profileId = $BAZARR_PROFILE_ID WHERE profileId IS NULL;
+        UPDATE table_movies SET profileId = $BAZARR_PROFILE_ID WHERE profileId IS NULL;
+    " >/dev/null 2>&1
+
+    BAZARR_SETTINGS_JSON="$(curl -fsS -H "X-API-KEY: $BAZARR_KEY" http://localhost:6767/api/system/settings || true)"
+    BAZARR_PROVIDER_FLAGS=()
+    if echo "$BAZARR_SETTINGS_JSON" | tr -d '[:space:]' | grep -q '"enabled_providers":\[\]'; then
+        BAZARR_PROVIDER_FLAGS=(
+            --data 'settings-general-enabled_providers=podnapisi'
+            --data 'settings-general-enabled_providers=tvsubtitles'
+            --data 'settings-general-enabled_providers=yifysubtitles'
+        )
+        warn "Bazarr had no subtitle providers enabled; applying safe free defaults"
+    else
+        warn "Bazarr already has subtitle providers configured; preserving them"
+    fi
+
+    api_post_bazarr_settings "Bazarr subtitle defaults configured" \
+        --data 'settings-general-single_language=false' \
+        --data 'settings-general-movie_default_enabled=true' \
+        --data "settings-general-movie_default_profile=$BAZARR_PROFILE_ID" \
+        --data 'settings-general-serie_default_enabled=true' \
+        --data "settings-general-serie_default_profile=$BAZARR_PROFILE_ID" \
+        "${BAZARR_PROVIDER_FLAGS[@]}"
+
+    docker restart bazarr >/dev/null
+    wait_for_service "Bazarr" "http://localhost:6767" 15
+    log "Bazarr existing library items assigned to subtitle profile"
+else
+    warn "sqlite3 not found; skipping Bazarr subtitle profile creation"
+fi
+
+echo ""
+
+# ============================================================
+# 7. Configure Seerr
+# ============================================================
+
+echo -e "${CYAN}[7/7] Configuring Seerr...${NC}"
 echo ""
 if [[ "$NON_INTERACTIVE" == true ]]; then
     if [[ "$MEDIA_SERVER" == "jellyfin" ]]; then
